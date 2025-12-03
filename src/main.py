@@ -1,135 +1,159 @@
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import seaborn as sns
 import jax.numpy as jnp
 import jax
 from jax import value_and_grad, jit
 import optax
 import os
 
-# --- 物理エンジン (設定は同じ: Crosstalk 15% + Phase Error 0.5) ---
-def create_realistic_engine(crosstalk_level=0.15, phase_error_std=0.5):
-    def init_fabrication_errors(key, num_params):
-        return jax.random.normal(key, shape=(num_params,)) * phase_error_std
+# ==========================================
+# 設定 (Configuration)
+# ==========================================
+N = 64  # 行列サイズ
+CROSSTALK_LEVEL = 0.15   # 15%の漏れ
+PHASE_ERROR_STD = 0.15   # 製造誤差
+STEPS = 8000             # ステップ数を少し増やす
+# ==========================================
+
+
+def create_scalable_engine(size, crosstalk, phase_error):
+    num_layers = size 
+    def count_params():
+        p_count = 0
+        for layer in range(num_layers * 2):
+            is_odd_layer = (layer % 2 == 1)
+            start_idx = 1 if is_odd_layer else 0
+            for i in range(start_idx, size - 1, 2):
+                p_count += 2
+        p_count += size
+        return p_count
+
+    total_params = count_params()
+    print(f"   Building {size}x{size} Mesh...")
+    print(f"   -> Required Voltage Parameters: {total_params}")
+
+    def init_fabrication_errors(key):
+        return jax.random.normal(key, shape=(total_params,)) * phase_error
+
+    def phase_shifter(voltage, error):
+        phi = (voltage * jnp.pi) + error
+        return jnp.array([[jnp.exp(1j * phi), 0], [0, 1.0 + 0j]])
+
     def directional_coupler():
         val = 1.0 / jnp.sqrt(2.0)
         return jnp.array([[val, val * 1j], [val * 1j, val]])
-    def phase_shifter(voltage, error_offset):
-        phi = (voltage * jnp.pi) + error_offset
-        return jnp.array([[jnp.exp(1j * phi), 0], [0, 1.0 + 0j]])
+
+    def mzi(v_theta, v_phi, e_theta, e_phi):
+        PS_phi = phase_shifter(v_phi, e_phi)
+        DC = directional_coupler()
+        PS_theta = phase_shifter(v_theta, e_theta)
+        return jnp.dot(DC, jnp.dot(PS_theta, jnp.dot(DC, PS_phi)))
+
     def apply_crosstalk(voltages):
-        size = voltages.shape[0]
-        identity = jnp.eye(size)
-        leak = jnp.eye(size, k=1) * crosstalk_level + jnp.eye(size, k=-1) * crosstalk_level
-        return jnp.dot(identity + leak, voltages)
-    def universal_mzi(v_theta, v_phi, err_theta, err_phi):
-        PS_phi = phase_shifter(v_phi, err_phi)
-        DC1 = directional_coupler()
-        PS_theta = phase_shifter(v_theta, err_theta)
-        DC2 = directional_coupler()
-        return jnp.dot(DC2, jnp.dot(PS_theta, jnp.dot(DC1, PS_phi)))
-    
+        if crosstalk == 0.0: return voltages
+        s = voltages.shape[0]
+        leak = jnp.eye(s, k=1) * crosstalk + jnp.eye(s, k=-1) * crosstalk
+        return jnp.dot(jnp.eye(s) + leak, voltages)
+
     @jit
     def simulate_mesh(params, static_errors):
         real_params = apply_crosstalk(params)
-        thetas, phis, outs = real_params[0:6], real_params[6:12], real_params[12:16]
-        e_thetas, e_phis, e_outs = static_errors[0:6], static_errors[6:12], static_errors[12:16]
-        T0 = universal_mzi(thetas[0], phis[0], e_thetas[0], e_phis[0])
-        T1 = universal_mzi(thetas[1], phis[1], e_thetas[1], e_phis[1])
-        L1 = jnp.block([[T0, jnp.zeros((2,2))], [jnp.zeros((2,2)), T1]])
-        T2 = universal_mzi(thetas[2], phis[2], e_thetas[2], e_phis[2])
-        L2 = jnp.eye(4, dtype=complex); L2 = L2.at[1:3, 1:3].set(T2)
-        T3 = universal_mzi(thetas[3], phis[3], e_thetas[3], e_phis[3])
-        T4 = universal_mzi(thetas[4], phis[4], e_thetas[4], e_phis[4])
-        L3 = jnp.block([[T3, jnp.zeros((2,2))], [jnp.zeros((2,2)), T4]])
-        T5 = universal_mzi(thetas[5], phis[5], e_thetas[5], e_phis[5])
-        L4 = jnp.eye(4, dtype=complex); L4 = L4.at[1:3, 1:3].set(T5)
-        U_mesh = jnp.dot(L4, jnp.dot(L3, jnp.dot(L2, L1)))
-        final_phases = (outs * jnp.pi) + e_outs
-        phase_matrix = jnp.diag(jnp.exp(1j * final_phases))
-        return jnp.dot(phase_matrix, U_mesh)
-    return simulate_mesh, init_fabrication_errors
+        U = jnp.eye(size, dtype=complex)
+        p_idx = 0
+        
+        for layer in range(num_layers * 2):
+            is_odd_layer = (layer % 2 == 1)
+            start_idx = 1 if is_odd_layer else 0
+            
+            for i in range(start_idx, size - 1, 2):
+                theta = real_params[p_idx];   e_theta = static_errors[p_idx]
+                phi   = real_params[p_idx+1]; e_phi   = static_errors[p_idx+1]
+                p_idx += 2
+                
+                m = mzi(theta, phi, e_theta, e_phi)
+                slice_U = jax.lax.dynamic_slice(U, (i, 0), (2, size))
+                new_slice = jnp.dot(m, slice_U)
+                U = jax.lax.dynamic_update_slice(U, new_slice, (i, 0))
+                
+        out_phases = real_params[p_idx : p_idx + size]
+        out_errors = static_errors[p_idx : p_idx + size]
+        phase_mat = jnp.diag(jnp.exp(1j * (out_phases * jnp.pi + out_errors)))
+        
+        return jnp.dot(phase_mat, U)
 
-def run_complete_report():
-    print("🚀 DiffPhoton: Generating Complete Report (Loss + Matrix)...")
+    return simulate_mesh, init_fabrication_errors, total_params
+
+def run_simulation():
+    print(f"🚀 DiffPhoton: Large Scale Simulation (N={N}) with Scheduler")
     
-    mesh_fn, error_gen_fn = create_realistic_engine(crosstalk_level=0.15, phase_error_std=0.5)
-    input_patterns = jnp.eye(4, dtype=complex)
-    target_patterns = jnp.array([[0,0,0,1], [0,0,1,0], [0,1,0,0], [1,0,0,0]], dtype=float)
-
+    mesh_fn, error_gen_fn, num_params = create_scalable_engine(N, CROSSTALK_LEVEL, PHASE_ERROR_STD)
+    
     key = jax.random.PRNGKey(42)
+    random_mat = jax.random.normal(key, (N, N)) + 1j * jax.random.normal(key, (N, N))
+    target_U, _ = jnp.linalg.qr(random_mat)
+    
     fab_key, train_key = jax.random.split(key)
-    static_errors = error_gen_fn(fab_key, 16)
+    static_errors = error_gen_fn(fab_key)
 
     @jit
     def loss_fn(params):
-        U = mesh_fn(params, static_errors)
-        outputs = jnp.abs(jnp.dot(U, input_patterns))**2
-        return jnp.mean((outputs - target_patterns.T)**2)
+        current_U = mesh_fn(params, static_errors)
+        diff = current_U - target_U
+        return jnp.sum(jnp.abs(diff)**2)
 
-    params = jax.random.uniform(train_key, shape=(16,), minval=-1.0, maxval=1.0)
-    optimizer = optax.adam(learning_rate=0.01)
+    params = jax.random.uniform(train_key, shape=(num_params,), minval=-1.0, maxval=1.0)
+    
+    # ★ 修正ポイント: 学習率スケジューラを導入
+    # 0.05 からスタートして、徐々に 0.001 まで下げる
+    schedule = optax.cosine_decay_schedule(init_value=0.05, decay_steps=STEPS, alpha=0.02)
+    optimizer = optax.adam(learning_rate=schedule)
+    
     opt_state = optimizer.init(params)
     
-    # --- 1. 学習と記録 ---
     loss_history = []
-    print("   Training...", end="", flush=True)
-    for i in range(2000):
+    
+    print(f"   Optimizing {num_params} parameters...", end="", flush=True)
+    
+    for i in range(STEPS):
         val, grads = value_and_grad(loss_fn)(params)
         updates, opt_state = optimizer.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
         loss_history.append(val)
+        
+        if i % (STEPS // 10) == 0:
+            print(f"[{val:.3f}]", end="", flush=True)
+            
     print(" Done!")
+    print(f"   Final Loss: {loss_history[-1]:.8f}")
 
-    # --- 2. テスト (Confusion Matrix) ---
-    print("   Testing...", end="")
-    test_key = jax.random.PRNGKey(999)
-    confusion_mat = jnp.zeros((4, 4))
-    U_final = mesh_fn(params, static_errors)
+    # --- 可視化 ---
+    final_U = mesh_fn(params, static_errors)
     
-    for i in range(4): 
-        noise = jax.random.normal(test_key, (4, 25)) * 0.1
-        batch_input = jnp.tile(input_patterns[:, i:i+1], (1, 25)) + noise
-        batch_out = jnp.abs(jnp.dot(U_final, batch_input))**2
-        predictions = jnp.argmax(batch_out, axis=0)
-        true_label = 3 - i
-        for pred in predictions:
-            confusion_mat = confusion_mat.at[true_label, pred].add(1)
-    print(" Done!")
-    
-    # --- 3. 統合グラフの描画 ---
     if not os.path.exists('output'): os.makedirs('output')
     
-    # 1行2列のキャンバスを作成
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     
-    # [左側] Loss History Plot
-    axes[0].plot(loss_history, color='#1f77b4', linewidth=2)
+    # 1. Loss
+    axes[0].plot(loss_history)
     axes[0].set_yscale('log')
-    axes[0].set_title("(A) Calibration Process (Loss)", fontsize=14)
-    axes[0].set_xlabel("Steps", fontsize=12)
-    axes[0].set_ylabel("Error (MSE)", fontsize=12)
-    axes[0].grid(True, which="both", alpha=0.3)
-    axes[0].text(0.95, 0.95, f'Final Loss:\n{loss_history[-1]:.1e}', 
-                 transform=axes[0].transAxes, ha='right', va='top', 
-                 bbox=dict(boxstyle="round", fc="white", ec="gray", alpha=0.9))
-
-    # [右側] Confusion Matrix Heatmap
-    sns.heatmap(confusion_mat, annot=True, fmt='g', cmap='Blues', cbar=False, 
-                ax=axes[1], annot_kws={'size': 16})
-    axes[1].set_title("(B) Inference Result (Accuracy 100%)", fontsize=14)
-    axes[1].set_xlabel("Predicted Output Port", fontsize=12)
-    axes[1].set_ylabel("True Input Class", fontsize=12)
-
-    plt.suptitle("DiffPhoton: Calibration of Defective Chip (Crosstalk 15%)", fontsize=16, y=0.98)
-    plt.tight_layout()
+    axes[0].set_title(f"Optimization History (N={N})")
+    axes[0].set_xlabel("Steps")
+    axes[0].set_ylabel("Matrix Distance")
     
-    output_path = "output/calibration_report.png"
+    # 2. Target
+    axes[1].imshow(jnp.abs(target_U), cmap='magma')
+    axes[1].set_title("Target Matrix (Amplitude)")
+    
+    # 3. Result
+    axes[2].imshow(jnp.abs(final_U), cmap='magma')
+    axes[2].set_title(f"Reproduced Matrix\nLoss={loss_history[-1]:.1e}")
+    
+    output_path = f"output/result_{N}x{N}.png"
     plt.savefig(output_path, dpi=300)
     plt.close()
     
-    print(f"✅ Full Report Saved: {os.path.abspath(output_path)}")
+    print(f"✅ Image Saved: {os.path.abspath(output_path)}")
 
 if __name__ == "__main__":
-    run_complete_report()
+    run_simulation()
