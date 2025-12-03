@@ -1,3 +1,4 @@
+# DiffPhoton-Reality-Mode
 # DiffPhoton: JAX-based Differentiable Photonic Simulator
 
 **Robust Calibration for Imperfect Photonic Circuits using Physics-Aware Training**
@@ -46,7 +47,7 @@ Despite severe signal degradation, the learning rate scheduler enables the AI to
 
 ---
 
-## Usage
+## 🛠 Usage
 
 ### Requirements
 - Python 3.8+
