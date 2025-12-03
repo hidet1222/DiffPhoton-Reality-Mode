@@ -5,16 +5,16 @@
 [![JAX](https://img.shields.io/badge/JAX-Powered-blue)](https://github.com/google/jax)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-##  Overview
+## Overview
 **DiffPhoton** is a differentiable physics simulator for programmable photonic integrated circuits (PICs).
 By leveraging JAX's automatic differentiation, this project demonstrates that **AI can perfectly calibrate "broken" optical chips** suffering from severe manufacturing errors and crosstalk.
 
 ---
 
-##  Key Achievements: Scaling & Robustness
+## Key Achievements: Scaling & Robustness
 We verified the scalability and robustness of the calibration algorithm on a large-scale **16x16 Clements Mesh** (496 control parameters).
 
-###  Robustness Verification (N=16)
+### Robustness Verification (N=16)
 Even under extreme physical imperfections, the optimizer successfully converged to the target unitary matrix.
 The results show that our algorithm can handle up to **20% crosstalk and 0.2 rad phase errors**.
 
@@ -28,7 +28,7 @@ The results show that our algorithm can handle up to **20% crosstalk and 0.2 rad
 
 ---
 
-##  Visualizations (The Story of Calibration)
+## Visualizations (The Story of Calibration)
 
 The following graphs show how the AI optimizer struggles and eventually overcomes increasing levels of physical noise.
 
@@ -46,7 +46,7 @@ Despite severe signal degradation, the learning rate scheduler enables the AI to
 
 ---
 
-## 🛠 Usage
+## Usage
 
 ### Requirements
 - Python 3.8+
