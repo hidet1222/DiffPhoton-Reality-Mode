@@ -10,17 +10,10 @@ import os
 # ==========================================
 # 設定 (Configuration)
 # ==========================================
-<<<<<<< HEAD
-N = 64 # 行列サイズ
-CROSSTALK_LEVEL = 0.20   # crosstalk レベル
-PHASE_ERROR_STD = 0.20   # 位相誤差の標準偏差
-STEPS = 8000             # 最適化ステップ数
-=======
-N = 64  # 行列サイズ
+N = 16  # 行列サイズ
 CROSSTALK_LEVEL = 0.15   # 15%の漏れ
 PHASE_ERROR_STD = 0.15   # 製造誤差
 STEPS = 8000             # ステップ数を少し増やす
->>>>>>> 7c00c8ed29099987cd97160ddf3ecc00285e9aaf
 # ==========================================
 
 
@@ -92,7 +85,7 @@ def create_scalable_engine(size, crosstalk, phase_error):
     return simulate_mesh, init_fabrication_errors, total_params
 
 def run_simulation():
-    print(f"🚀 DiffPhoton: Large Scale Simulation (N={N}) with Scheduler")
+    print(f"DiffPhoton: Large Scale Simulation (N={N}) with Scheduler")
     
     mesh_fn, error_gen_fn, num_params = create_scalable_engine(N, CROSSTALK_LEVEL, PHASE_ERROR_STD)
     
@@ -160,11 +153,7 @@ def run_simulation():
     plt.savefig(output_path, dpi=300)
     plt.close()
     
-    print(f"✅ Image Saved: {os.path.abspath(output_path)}")
+    print(f"Image Saved: {os.path.abspath(output_path)}")
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     run_simulation()
-=======
-    run_simulation()
->>>>>>> 7c00c8ed29099987cd97160ddf3ecc00285e9aaf
