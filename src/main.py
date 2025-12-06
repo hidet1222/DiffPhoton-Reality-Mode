@@ -10,10 +10,17 @@ import os
 # ==========================================
 # 設定 (Configuration)
 # ==========================================
+<<<<<<< HEAD
 N = 64 # 行列サイズ
 CROSSTALK_LEVEL = 0.20   # crosstalk レベル
 PHASE_ERROR_STD = 0.20   # 位相誤差の標準偏差
 STEPS = 8000             # 最適化ステップ数
+=======
+N = 64  # 行列サイズ
+CROSSTALK_LEVEL = 0.15   # 15%の漏れ
+PHASE_ERROR_STD = 0.15   # 製造誤差
+STEPS = 8000             # ステップ数を少し増やす
+>>>>>>> 7c00c8ed29099987cd97160ddf3ecc00285e9aaf
 # ==========================================
 
 
@@ -156,4 +163,8 @@ def run_simulation():
     print(f"✅ Image Saved: {os.path.abspath(output_path)}")
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     run_simulation()
+=======
+    run_simulation()
+>>>>>>> 7c00c8ed29099987cd97160ddf3ecc00285e9aaf
